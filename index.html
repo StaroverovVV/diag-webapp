@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Диагностика Лидера</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --bg-color: #1c1c1e;
+            --card-bg: #2c2c2e;
+            --accent-color: #007aff;
+            --text-color: #ffffff;
+            --secondary-text: #a1a1a2;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+        .container { width: 100%; max-width: 400px; }
+        .header { text-align: center; margin-bottom: 30px; animation: fadeIn 0.5s ease; }
+        .header h1 { font-size: 24px; font-weight: 600; margin-bottom: 12px; }
+        .header p { color: var(--secondary-text); font-size: 15px; line-height: 1.4; }
+        
+        .step { display: none; animation: slideIn 0.3s ease-out; }
+        .step.active { display: block; }
+        
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+        .question { font-size: 18px; font-weight: 500; margin-bottom: 24px; line-height: 1.4; }
+        .options { display: flex; flex-direction: column; gap: 12px; }
+        .option {
+            background: var(--card-bg);
+            padding: 16px;
+            border-radius: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid rgba(255,255,255,0.1);
+            text-align: left;
+            font-size: 16px;
+        }
+        .option:active { background: var(--accent-color); transform: scale(0.98); }
+        
+        .btn-primary {
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 18px;
+            border-radius: 14px;
+            width: 100%;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #3a3a3c;
+            border-radius: 3px;
+            margin-bottom: 30px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: var(--accent-color);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Screen 1: Welcome -->
+        <div class="step active" id="screen-intro">
+            <div class="header">
+                <h1>Диагностика Лидера</h1>
+                <p>Это не тест на хорошего или плохого руководителя.<br><br>Это карта: где бизнес упирается в потолок — в личный контроль, действия руководителя, командную правду или систему процессов.</p>
+                <p style="font-size: 13px; margin-top: 15px;">Будет 20 утверждений. Отвечайте по реальности, не по идеальной картинке.</p>
+            </div>
+            <button class="btn-primary" onclick="showScreen('screen-instruction')">Начать диагностику</button>
+        </div>
+
+        <!-- Screen 2: Instructions -->
+        <div class="step" id="screen-instruction">
+            <div class="header">
+                <h1>Как отвечать</h1>
+                <p>Отвечайте быстро. Здесь важна не точность до миллиметра, а узнавание: «похоже на нас / не похоже».</p>
+                <p style="font-size: 14px; color: var(--accent-color); font-weight: 600;">Шкала простая: Не про нас $\rightarrow$ Бывает $\rightarrow$ Прямо про нас</p>
+            </div>
+            <button class="btn-primary" onclick="startQuiz()">Поехали!</button>
+        </div>
+
+        <!-- Quiz Interface -->
+        <div class="step" id="screen-quiz">
+            <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+            <div class="question" id="q-text">Загрузка вопроса...</div>
+            <div class="options">
+                <div class="option" onclick="recordAnswer(0)">Не про нас</div>
+                <div class="option" onclick="recordAnswer(1)">Бывает</div>
+                <div class="option" onclick="recordAnswer(2)">Прямо про нас</div>
+            </div>
+        </div>
+
+        <!-- Final Screen -->
+        <div class="step" id="screen-final">
+            <div class="header">
+                <h1>Готово!</h1>
+                <p>Ваши ответы отправлены. Бот сейчас рассчитает ваш «управленческий узел» и пришлет результат в чат.</p>
+            </div>
+            <button class="btn-primary" onclick="tg.close()">Вернуться в бот</button>
+        </div>
+    </div>
+
+    <script>
+        let tg = window.Telegram.WebApp;
+        tg.expand();
+
+        const questions = [
+            { text: "Мой день часто съедают согласования и переписка, а не задачи, которые двигают бизнес вперёд.", quad: "Действия" },
+            { text: "Многие процессы работают не по понятным правилам, а по ручным договорённостям.", quad: "Система" },
+            { text: "Плохие новости доходят до меня позже, чем нужно, чтобы исправить их дёшево.", quad: "Команда" },
+            { text: "Есть задачи, которые не отдаю не потому что некому, а потому что так спокойнее за результат.", quad: "Я" },
+            { text: "Даже когда есть время обсудить с командой, я часто закрываю решение сам — чтобы не растягивать.", quad: "Действия" },
+            { text: "Когда что-то идёт не так, не всегда понятно, чья это зона ответственности.", quad: "Система" },
+            { text: "На встречах согласие выглядит сильнее, чем потом оказывается в работе.", quad: "Команда" },
+            { text: "Когда решение может задеть людей или поменять привычные договорённости, я часто откладываю разговор дольше, чем нужно.", quad: "Я" },
+            { text: "Делегирую задачу, но через день-два всё равно возвращаюсь проверить, как она идёт.", quad: "Действия" },
+            { text: "Нет понятных метрик или отчётов, которые показывают проблему раньше, чем о ней кто-то расскажет.", quad: "Система" },
+            { text: "Мне приносят не всю картину, а версию, с которой безопаснее зайти ко мне.", quad: "Команда" },
+            { text: "Мне спокойнее, когда ключевые решения остаются под моим контролем.", quad: "Я" },
+            { text: "Часто проще самому доделать работу сотрудника, чем вернуть её с комментариями на доработку.", quad: "Действия" },
+            { text: "Если я на неделю выключаюсь из операционки, часть решений и процессов заметно тормозит.", quad: "Система" },
+            { text: "Сильные сотрудники стали тише и реже спорят на встречах.", quad: "Команда" },
+            { text: "Если проект идёт не так, как я представлял, мне трудно отпустить его из внимания.", quad: "Я" },
+            { text: "Даже когда задача уже у команды, финальное «да» часто всё равно ждут от меня.", quad: "Действия" },
+            { text: "Чем больше растёт бизнес, тем больше он требует моего личного рабочего времени.", quad: "Система" },
+            { text: "Несогласие чаще звучит в личных разговорах, чем на общей встрече.", quad: "Команда" },
+            { text: "Я стараюсь не показывать команде свои сомнения, даже когда они есть.", quad: "Я" }
+        ];
+
+        let currentQ = 0;
+        let results = { "Я": 0, "Действия": 0, "Команда": 0, "Система": 0 };
+
+        function showScreen(id) {
+            document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+        }
+
+        function startQuiz() {
+            showScreen('screen-quiz');
+            updateQuestion();
+        }
+
+        function updateQuestion() {
+            if (currentQ < questions.length) {
+                document.getElementById('q-text').innerText = questions[currentQ].text;
+                document.getElementById('progress').style.width = (currentQ / questions.length * 100) + '%';
+            } else {
+                finishQuiz();
+            }
+        }
+
+        function recordAnswer(value) {
+            const quad = questions[currentQ].quad;
+            results[quad] += value;
+            currentQ++;
+            updateQuestion();
+        }
+
+        function finishQuiz() {
+            showScreen('screen-final');
+            tg.sendData(JSON.stringify(results));
+        }
+    </script>
+</body>
+</html>
