@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  typecheck:
+  validate:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -20,3 +20,4 @@ jobs:
           node-version: "22"
       - run: npm install
       - run: npm run typecheck
+      - run: npx wrangler deploy --dry-run --outdir dist
