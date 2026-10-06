@@ -997,16 +997,17 @@ async function miroCreateWeekly(
 
   const cards = summary.cards.slice(0, 5);
   const colors = [
-    "light_yellow",
-    "light_green",
-    "light_blue",
-    "gray",
-    "light_yellow",
+    "#fff9b1",
+    "#d5f692",
+    "#a6ccf5",
+    "#e6e6e6",
+    "#fff9b1",
   ];
 
   for (let i = 0; i < cards.length; i++) {
-    const px = x - 1120 + i * 560;
-    const py = y + 60;
+    // Children of a Miro frame are positioned relative to the frame top-left.
+    const px = 440 + i * 570;
+    const py = 720;
     const response = await fetch(
       `https://api.miro.com/v2/boards/${encodeURIComponent(env.MIRO_BOARD_ID)}/sticky_notes`,
       {
@@ -1054,7 +1055,8 @@ async function miroCreateWeekly(
       },
       body: JSON.stringify({
         data: { content: htmlEscape(header) },
-        position: { x, y: y - 510, origin: "center" },
+        position: { x: 1600, y: 150, origin: "center" },
+        geometry: { width: 2700 },
         parent: { id: frameId },
       }),
     },
