@@ -1,165 +1,73 @@
 # Coach Reflection Bot — Cloudflare MVP
 
-Minimal 24/7 Telegram reflection bot for a three-person coaching chat:
+Minimal 24/7 Telegram bot for a three-person coaching chat:
 
 - coach
 - client
 - bot
 
-The bot does only two visible things:
+Visible behavior is intentionally small:
 
-1. Morning: sends one focus + one practice.
-2. Evening: asks what the client noticed.
-
-The client can reply with text or a Telegram voice message.
-
-Behind the scenes:
-
-- Telegram = interaction
-- Cloudflare D1 = durable queue + source event log
-- Workers AI Whisper = Russian voice transcription
-- Workers AI Llama = factual structuring, no "AI coaching"
-- Notion = structured source of truth
-- Obsidian = generated Markdown mirror when Obsidian is open
-- Miro = weekly synthesis only, not every raw message
-
-No client names, board IDs, database IDs, or tokens are committed to this public source folder.
-
-## Models
-
-- Audio: `@cf/openai/whisper-large-v3-turbo`
-- Text: `@cf/meta/llama-3.1-8b-instruct-fast`
-
-Both run through a Workers AI binding.
-
-## Visible Telegram behavior
-
-Morning:
-
-```
-Фокус сегодня:
-<weekly focus>
-
-Практика:
-<one small practice>
-```
-
-Evening:
-
-```
-Что сегодня заметила про этот фокус?
-
-Можно написать или наговорить.
-```
+1. Morning: one focus + one practice.
+2. Evening: one question — what did you notice?
+3. Client can answer with text or Telegram voice.
 
 The bot stays silent in normal conversation.
 
-An observation is captured only when:
-
-- the user replies to a morning/evening bot prompt;
-- the user runs `/log`, then sends text/voice within 15 minutes;
-- a text message begins with `наблюдение:` or `#наблюдение`.
-
-## Telegram commands
-
-Public/bootstrap:
-
-- `/chatid`
-- `/whoami`
-- `/bind <BIND_CODE>`
-
-In the bound coaching chat:
-
-- `/focus`
-- `/log`
-- `/summary`
-- `/help`
-
-Coach-only when `COACH_USER_ID` is configured:
-
-- `/setfocus ...`
-- `/setpractice ...`
-- `/settime 09:00 20:30`
-- `/setclient Имя клиента`
-
-## 1. Create the Cloudflare D1 database
-
-From this folder:
-
-```bash
-npm install
-npx wrangler login
-npx wrangler d1 create coach-reflection-bot
-```
-
-Copy the returned `database_id` into `wrangler.jsonc` in place of:
+## Architecture
 
 ```
-REPLACE_AFTER_D1_CREATE
+Telegram
+  ↓
+Cloudflare Worker 24/7
+  ↓
+D1 raw event log + queue
+  ↓
+Workers AI
+  ├─ Whisper Large v3 Turbo → Russian voice → text
+  └─ Llama 3.1 8B Instruct Fast → factual structured observation
+  ↓
+Notion — structured source of truth
+  ↓
+├─ Obsidian — generated weekly Markdown mirror
+└─ Miro — weekly synthesis only
 ```
 
-Apply migrations:
+No client names, board IDs, Notion IDs, or tokens are committed to this public source folder.
 
-```bash
-npx wrangler d1 migrations apply coach-reflection-bot --remote
-```
+## One-click deploy
 
-## 2. Set Cloudflare secrets
+Cloudflare supports deploying a public Git repository subdirectory and automatically provisioning declared resources such as D1 and Workers AI.
 
-Never put these values into Git.
+[Deploy this bot to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/StaroverovVV/diag-webapp/tree/main/coach-reflection-bot)
 
-```bash
-npx wrangler secret put TELEGRAM_BOT_TOKEN
-npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
-npx wrangler secret put BIND_CODE
-npx wrangler secret put ADMIN_TOKEN
-npx wrangler secret put OBSIDIAN_SYNC_TOKEN
-npx wrangler secret put COACH_USER_ID
-```
+During setup Cloudflare will ask for these secret values:
 
-Optional Notion sink:
+- `TELEGRAM_BOT_TOKEN` — token from @BotFather
+- `SETUP_CODE` — your random 12+ character code
+- `NOTION_TOKEN` — Notion internal integration secret
+- `NOTION_DATA_SOURCE_ID` — observations data source
+- `MIRO_ACCESS_TOKEN` — Miro access token with board write access
+- `MIRO_BOARD_ID` — target client board
 
-```bash
-npx wrangler secret put NOTION_TOKEN
-npx wrangler secret put NOTION_DATA_SOURCE_ID
-```
+The D1 binding is declared without an account-specific resource ID, so Cloudflare provisions it during deployment.
 
-Optional Miro weekly sink:
+The deploy script applies D1 migrations and then deploys the Worker.
 
-```bash
-npx wrangler secret put MIRO_ACCESS_TOKEN
-npx wrangler secret put MIRO_BOARD_ID
-```
+## After deploy
 
-### Secret meanings
-
-- `TELEGRAM_BOT_TOKEN` — BotFather token.
-- `TELEGRAM_WEBHOOK_SECRET` — random secret used by Telegram to sign webhook calls.
-- `BIND_CODE` — one-time-ish code used to bind the bot to the intended Telegram group.
-- `ADMIN_TOKEN` — protects admin HTTP endpoints.
-- `OBSIDIAN_SYNC_TOKEN` — protects Markdown export read access.
-- `COACH_USER_ID` — Telegram numeric user ID of the coach.
-- `NOTION_TOKEN` — Notion integration token with access to the observations data source.
-- `NOTION_DATA_SOURCE_ID` — Notion data source used as source of truth.
-- `MIRO_ACCESS_TOKEN` — Miro OAuth/access token with `boards:write`.
-- `MIRO_BOARD_ID` — target board ID.
-
-## 3. Deploy
-
-```bash
-npx wrangler deploy
-```
-
-You will get a URL similar to:
+Cloudflare gives you a Worker URL similar to:
 
 ```
-https://coach-reflection-bot.<subdomain>.workers.dev
+https://coach-reflection-bot.<your-subdomain>.workers.dev
 ```
 
-Health check:
+### 1. Health check
 
-```bash
-curl https://coach-reflection-bot.<subdomain>.workers.dev/health
+Open:
+
+```
+<WORKER_URL>/health
 ```
 
 Expected:
@@ -168,62 +76,155 @@ Expected:
 {"ok":true,"service":"coach-reflection-bot"}
 ```
 
-## 4. Set Telegram webhook
+### 2. Register Telegram webhook
 
-```bash
-curl -X POST \
-  -H "Authorization: Bearer <ADMIN_TOKEN>" \
-  https://coach-reflection-bot.<subdomain>.workers.dev/admin/set-webhook
+Open in your browser:
+
+```
+<WORKER_URL>/bootstrap?code=<SETUP_CODE>
 ```
 
-The Worker registers its own `/telegram` endpoint and configures Telegram's secret-token header.
+The Worker derives a Telegram webhook secret from the BotFather token. No second webhook secret needs to be configured.
 
-## 5. Create the three-person Telegram chat
+### 3. Create the coaching Telegram group
 
-Create the group:
+Add:
 
 - coach
 - client
 - bot
 
-In the group:
+Then the coach sends:
 
 ```
-/bind <BIND_CODE>
+/bind <SETUP_CODE>
 ```
+
+The person who successfully performs `/bind` becomes the coach/admin for this bot instance.
 
 Then:
 
 ```
-/setclient <client name>
-/setfocus <weekly focus>
-/setpractice <weekly practice>
+/setclient Юлия Быченкова
+/setfocus Не забирать решение, которое человек уже способен принять сам.
+/setpractice Прежде чем давать ответ, спросить: «Что ты намерен сделать?»
 /settime 09:00 20:30
 ```
 
-The Worker runs one cron every 15 minutes and checks local time in `Europe/Moscow`.
-That keeps morning/evening times editable without redeploying the Worker.
+## Telegram commands
 
-## 6. Notion
+For the group:
 
-The current implementation expects these existing property names:
+- `/focus` — current focus + practice
+- `/log` — next text/voice becomes an observation
+- `/summary` — factual 7-day summary
+- `/help`
+
+Coach-only:
+
+- `/setfocus ...`
+- `/setpractice ...`
+- `/settime 09:00 20:30`
+- `/setclient ...`
+- `/status`
+- `/syncmiro`
+- `/obsidiantoken` — only use in private chat with the bot
+
+Utility:
+
+- `/chatid`
+- `/whoami`
+
+## What becomes an observation
+
+An ordinary group discussion is ignored.
+
+The bot captures only when:
+
+- client replies to the morning/evening bot prompt;
+- client runs `/log`, then sends text/voice within 15 minutes;
+- text starts with `наблюдение:` or `#наблюдение`.
+
+This keeps the bot from becoming a third coach in the room.
+
+## AI behavior
+
+The AI prompt explicitly forbids:
+
+- diagnosis;
+- personality interpretation;
+- inventing motives;
+- long advice;
+- coaching in place of the human coach.
+
+It extracts only:
+
+```
+situation
+impulse
+action
+alternative
+other_action
+result
+zone = Я / Вместе / Сам / Неясно
+follow_up_question = max one question
+```
+
+## Reliability
+
+The order is deliberate:
+
+1. raw Telegram message is written to D1;
+2. voice is transcribed if needed;
+3. AI structures the episode;
+4. structured observation is saved;
+5. Notion is updated;
+6. Miro/Obsidian are secondary projections.
+
+If Notion or Miro is temporarily unavailable, the raw event is already durable in D1.
+
+Duplicate Telegram deliveries are deduplicated by `chat_id + message_id`.
+
+## Notion
+
+The current sink expects these existing properties:
 
 - `Запись` — title
-- `Ситуация` — rich text
-- `Импульс` — rich text
-- `Действие` — rich text
-- `Альтернатива` — rich text
-- `Результат` — rich text
+- `Ситуация`
+- `Импульс`
+- `Действие`
+- `Альтернатива`
+- `Результат`
 
-It also places the current focus, zone, source, and raw observation into page content.
+The page body also stores:
 
-If Notion is temporarily unavailable, the observation is already safe in D1 and the Telegram raw-message log.
+- focus;
+- zone;
+- source;
+- raw observation.
 
-## 7. Obsidian
+## Miro
 
-The bot itself stays online even when the Mac is asleep.
+Miro is intentionally not updated on every message.
 
-Obsidian cannot be written to while the local vault is offline, so the included plugin solves this without exposing the vault:
+Once per week the Worker:
+
+1. reads the previous 7 days;
+2. produces up to five factual cards;
+3. creates one weekly frame;
+4. creates up to five sticky notes.
+
+Manual coach command:
+
+```
+/syncmiro
+```
+
+## Obsidian
+
+The Worker stays online while the Mac is asleep.
+
+The local Obsidian vault cannot be edited while the Mac is offline, so this repo includes a tiny Obsidian plugin:
 
 ```
 obsidian-plugin/
@@ -237,61 +238,44 @@ Install it into:
 <Vault>/.obsidian/plugins/coach-reflection-sync/
 ```
 
-Then enable it and set:
+Then:
 
-- Worker endpoint
-- `OBSIDIAN_SYNC_TOKEN`
+1. send `/obsidiantoken` to the bot in a **private Telegram chat**;
+2. copy the returned token into plugin settings;
+3. enter the Worker URL in plugin settings.
 
-While Obsidian is open, it refreshes generated weekly Markdown notes every 10 minutes.
+When Obsidian is open, the plugin refreshes the latest weekly Markdown notes every 10 minutes.
 
-The Worker remains the durable 24/7 source, so nothing is lost while the Mac is off.
+The Worker remains the 24/7 durable source while the computer is off.
 
-## 8. Miro
+## Manual CLI deployment
 
-Miro is deliberately **not** updated for every message.
-
-Once a week the Worker:
-
-1. reads the previous 7 days from D1;
-2. asks the text model for up to five factual cards;
-3. creates one weekly frame in Miro;
-4. creates up to five sticky notes.
-
-This prevents the client board from turning into a raw-message dump.
-
-Manual test:
+If you prefer Wrangler instead of the button:
 
 ```bash
-curl -X POST \
-  -H "Authorization: Bearer <ADMIN_TOKEN>" \
-  https://coach-reflection-bot.<subdomain>.workers.dev/admin/sync-miro
+npm install
+npx wrangler login
+npm run deploy
 ```
 
-## 9. Status
+Wrangler can automatically provision the D1 binding declared in `wrangler.jsonc`.
 
-```bash
-curl \
-  -H "Authorization: Bearer <ADMIN_TOKEN>" \
-  https://coach-reflection-bot.<subdomain>.workers.dev/admin/status
+Set secrets with `wrangler secret put` before using the external integrations, or use the Deploy to Cloudflare flow above.
+
+## CI
+
+GitHub Actions runs:
+
+```
+npm install
+npm run typecheck
 ```
 
-This reports configuration state without returning secrets.
-
-## Reliability rules implemented
-
-1. Raw Telegram input is persisted before interpretation.
-2. Duplicate Telegram updates are deduplicated by `chat_id + message_id`.
-3. AI interpretation is separate from raw storage.
-4. Notion failure does not lose the observation.
-5. Miro is a weekly secondary projection only.
-6. Obsidian is a mirror that catches up after the local app returns online.
-7. The bot never comments on ordinary conversation unless explicitly triggered.
-8. The AI prompt forbids diagnosis and personality interpretation.
+on changes to this folder.
 
 ## Privacy
 
-Do not commit tokens.
-
-The repository code contains no client-specific secrets.
-
-For production use, keep Cloudflare Secrets scoped to this Worker and give Notion/Miro integrations access only to the specific client resources they need.
+- Never commit tokens.
+- The public source code contains no client-specific data.
+- Keep Notion and Miro integrations scoped to only the resources needed by the client workflow.
+- Raw audio is downloaded only for transcription; the Worker does not intentionally archive the Telegram audio file itself.
