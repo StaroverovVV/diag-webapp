@@ -1,0 +1,11 @@
+# Required
+TELEGRAM_BOT_TOKEN=replace-with-botfather-token
+SETUP_CODE=replace-with-random-12-plus-char-code
+
+# Required for Notion sync
+NOTION_TOKEN=replace-with-notion-integration-secret
+NOTION_DATA_SOURCE_ID=replace-with-notion-data-source-id
+
+# Required for weekly Miro synthesis
+MIRO_ACCESS_TOKEN=replace-with-miro-access-token
+MIRO_BOARD_ID=replace-with-miro-board-id
