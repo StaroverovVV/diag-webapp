@@ -5,12 +5,7 @@ export interface Env {
   DB: D1Database;
 
   TELEGRAM_BOT_TOKEN: string;
-  TELEGRAM_WEBHOOK_SECRET: string;
-  BIND_CODE: string;
-  ADMIN_TOKEN: string;
-  OBSIDIAN_SYNC_TOKEN: string;
-
-  COACH_USER_ID?: string;
+  SETUP_CODE: string;
 
   NOTION_TOKEN?: string;
   NOTION_DATA_SOURCE_ID?: string;
@@ -110,6 +105,24 @@ function displayName(user?: TelegramUser): string {
 function bearer(request: Request): string {
   const h = request.headers.get("authorization") || "";
   return h.startsWith("Bearer ") ? h.slice(7) : "";
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function telegramWebhookSecret(env: Env): Promise<string> {
+  return (await sha256Hex(env.TELEGRAM_BOT_TOKEN + "|coach-webhook")).slice(0, 64);
+}
+
+function randomToken(bytes = 24): string {
+  const data = new Uint8Array(bytes);
+  crypto.getRandomValues(data);
+  return [...data].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 function isValidHHMM(value: string): boolean {
@@ -248,9 +261,9 @@ async function sendMessage(
   });
 }
 
-function isCoach(env: Env, userId?: number): boolean {
-  if (!env.COACH_USER_ID) return true;
-  return String(userId ?? "") === String(env.COACH_USER_ID);
+async function isCoach(env: Env, userId?: number): Promise<boolean> {
+  const coachId = await getSetting(env, "coach_user_id", "");
+  return Boolean(coachId) && String(userId ?? "") === coachId;
 }
 
 async function boundChat(env: Env): Promise<string> {
@@ -1167,7 +1180,7 @@ async function handleCommand(
   }
 
   if (command === "/bind") {
-    if (!arg || arg !== env.BIND_CODE) {
+    if (!arg || arg !== env.SETUP_CODE) {
       await sendMessage(env, message.chat.id, "Неверный код привязки.");
       return true;
     }
@@ -1176,6 +1189,7 @@ async function handleCommand(
       return true;
     }
     await setSetting(env, "chat_id", chatId);
+    await setSetting(env, "coach_user_id", String(message.from?.id ?? ""));
     await sendMessage(
       env,
       message.chat.id,
@@ -1230,7 +1244,7 @@ async function handleCommand(
   }
 
   if (command === "/setfocus") {
-    if (!isCoach(env, message.from?.id)) {
+    if (!(await isCoach(env, message.from?.id))) {
       await sendMessage(env, message.chat.id, "Эту команду меняет только коуч.");
       return true;
     }
@@ -1248,7 +1262,7 @@ async function handleCommand(
   }
 
   if (command === "/setpractice") {
-    if (!isCoach(env, message.from?.id)) {
+    if (!(await isCoach(env, message.from?.id))) {
       await sendMessage(env, message.chat.id, "Эту команду меняет только коуч.");
       return true;
     }
@@ -1266,7 +1280,7 @@ async function handleCommand(
   }
 
   if (command === "/settime") {
-    if (!isCoach(env, message.from?.id)) {
+    if (!(await isCoach(env, message.from?.id))) {
       await sendMessage(env, message.chat.id, "Эту команду меняет только коуч.");
       return true;
     }
@@ -1290,7 +1304,7 @@ async function handleCommand(
   }
 
   if (command === "/setclient") {
-    if (!isCoach(env, message.from?.id)) return true;
+    if (!(await isCoach(env, message.from?.id))) return true;
     if (!arg) {
       await sendMessage(
         env,
@@ -1309,6 +1323,51 @@ async function handleCommand(
     return true;
   }
 
+  if (command === "/status") {
+    if (!(await isCoach(env, message.from?.id))) return true;
+    await sendMessage(env, message.chat.id, await statusText(env));
+    return true;
+  }
+
+  if (command === "/syncmiro") {
+    if (!(await isCoach(env, message.from?.id))) return true;
+    const local = localParts(
+      new Date(),
+      env.TIME_ZONE || "Europe/Moscow",
+    );
+    await miroCreateWeekly(env, local.date);
+    await sendMessage(env, message.chat.id, "Недельный синтез Miro проверен.");
+    return true;
+  }
+
+  if (command === "/obsidiantoken") {
+    if (!(await isCoach(env, message.from?.id))) return true;
+    if (message.chat.type !== "private") {
+      await sendMessage(
+        env,
+        message.chat.id,
+        "Эту команду отправь боту в личном чате — токен не должен видеть групповой чат.",
+      );
+      return true;
+    }
+    let token = await getSetting(env, "obsidian_sync_token", "");
+    if (!token) {
+      token = randomToken(24);
+      await setSetting(env, "obsidian_sync_token", token);
+    }
+    await sendMessage(
+      env,
+      message.chat.id,
+      [
+        "Токен Obsidian Sync:",
+        token,
+        "",
+        "Вставь его в настройках плагина Coach Reflection Sync.",
+      ].join("\n"),
+    );
+    return true;
+  }
+
   if (command === "/help") {
     await sendMessage(
       env,
@@ -1320,6 +1379,9 @@ async function handleCommand(
         "/setfocus — изменить фокус (коуч)",
         "/setpractice — изменить практику (коуч)",
         "/settime — время утро/вечер (коуч)",
+        "/status — статус интеграций (коуч)",
+        "/syncmiro — собрать недельный Miro сейчас (коуч)",
+        "/obsidiantoken — токен синхронизации Obsidian, только в личке (коуч)",
         "/whoami — Telegram user ID",
         "",
         "Обычный разговор бот не комментирует.",
@@ -1369,35 +1431,41 @@ async function handleTelegramUpdate(
   await processObservationMessage(env, message);
 }
 
-async function adminSetWebhook(
+async function bootstrap(
   request: Request,
   env: Env,
 ): Promise<Response> {
-  if (bearer(request) !== env.ADMIN_TOKEN) {
-    return new Response("Unauthorized", { status: 401 });
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code") || "";
+
+  if (!code || code !== env.SETUP_CODE) {
+    return new Response("Forbidden", { status: 403 });
   }
 
-  const url = new URL(request.url);
   const webhookUrl = `${url.origin}/telegram`;
+  const secret = await telegramWebhookSecret(env);
 
-  const result = await telegram(env, "setWebhook", {
+  await telegram(env, "setWebhook", {
     url: webhookUrl,
-    secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+    secret_token: secret,
     allowed_updates: ["message"],
     drop_pending_updates: false,
   });
 
-  return json({ ok: true, webhookUrl, result });
+  return new Response(
+    [
+      "Telegram webhook is ready.",
+      "",
+      "Next:",
+      "1. Add the bot to the private coaching group.",
+      "2. In that group send: /bind <your SETUP_CODE>",
+      "3. Then send /focus.",
+    ].join("\n"),
+    { headers: { "content-type": "text/plain; charset=utf-8" } },
+  );
 }
 
-async function adminStatus(
-  request: Request,
-  env: Env,
-): Promise<Response> {
-  if (bearer(request) !== env.ADMIN_TOKEN) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-
+async function statusText(env: Env): Promise<string> {
   const chatId = await boundChat(env);
   const focus = await getSetting(env, "weekly_focus", DEFAULT_FOCUS);
   const practice = await getSetting(
@@ -1408,33 +1476,18 @@ async function adminStatus(
   const morning = await getSetting(env, "morning_time", "09:00");
   const evening = await getSetting(env, "evening_time", "20:30");
 
-  return json({
-    ok: true,
-    bound: Boolean(chatId),
-    chat_id: chatId || null,
-    focus,
-    practice,
-    morning,
-    evening,
-    timezone: env.TIME_ZONE || "Europe/Moscow",
-    notion_enabled: Boolean(env.NOTION_TOKEN && env.NOTION_DATA_SOURCE_ID),
-    miro_enabled: Boolean(env.MIRO_ACCESS_TOKEN && env.MIRO_BOARD_ID),
-  });
-}
-
-async function adminMiroSync(
-  request: Request,
-  env: Env,
-): Promise<Response> {
-  if (bearer(request) !== env.ADMIN_TOKEN) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-  const local = localParts(
-    new Date(),
-    env.TIME_ZONE || "Europe/Moscow",
-  );
-  await miroCreateWeekly(env, local.date);
-  return json({ ok: true, week: isoWeek(local.date) });
+  return [
+    "Статус:",
+    `Чат привязан: ${chatId ? "да" : "нет"}`,
+    `Notion: ${env.NOTION_TOKEN && env.NOTION_DATA_SOURCE_ID ? "подключен" : "нет"}`,
+    `Miro: ${env.MIRO_ACCESS_TOKEN && env.MIRO_BOARD_ID ? "подключен" : "нет"}`,
+    `Утро: ${morning}`,
+    `Вечер: ${evening}`,
+    `Часовой пояс: ${env.TIME_ZONE || "Europe/Moscow"}`,
+    "",
+    `Фокус: ${focus}`,
+    `Практика: ${practice}`,
+  ].join("\n");
 }
 
 function markdownEntry(row: any): string {
@@ -1457,7 +1510,8 @@ async function obsidianExport(
   request: Request,
   env: Env,
 ): Promise<Response> {
-  if (bearer(request) !== env.OBSIDIAN_SYNC_TOKEN) {
+  const expectedToken = await getSetting(env, "obsidian_sync_token", "");
+  if (!expectedToken || bearer(request) !== expectedToken) {
     return new Response("Unauthorized", { status: 401 });
   }
 
@@ -1534,24 +1588,10 @@ export default {
     }
 
     if (
-      request.method === "POST" &&
-      url.pathname === "/admin/set-webhook"
-    ) {
-      return adminSetWebhook(request, env);
-    }
-
-    if (
       request.method === "GET" &&
-      url.pathname === "/admin/status"
+      url.pathname === "/bootstrap"
     ) {
-      return adminStatus(request, env);
-    }
-
-    if (
-      request.method === "POST" &&
-      url.pathname === "/admin/sync-miro"
-    ) {
-      return adminMiroSync(request, env);
+      return bootstrap(request, env);
     }
 
     if (
@@ -1568,7 +1608,7 @@ export default {
       const secret = request.headers.get(
         "x-telegram-bot-api-secret-token",
       );
-      if (secret !== env.TELEGRAM_WEBHOOK_SECRET) {
+      if (secret !== (await telegramWebhookSecret(env))) {
         return new Response("Forbidden", { status: 403 });
       }
 
