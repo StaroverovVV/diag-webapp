@@ -1,0 +1,9 @@
+{
+  "id": "coach-reflection-sync",
+  "name": "Coach Reflection Sync",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Syncs structured coaching observations from the Cloudflare Telegram bot into generated weekly Markdown notes.",
+  "author": "Staroverov",
+  "isDesktopOnly": false
+}
