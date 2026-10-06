@@ -423,7 +423,7 @@ async function structureObservation(
       ],
       response_format: {
         type: "json_schema",
-        json_schema: observationSchema,
+        schema: observationSchema,
       },
     },
   );
@@ -896,7 +896,7 @@ async function summarizeWeek(env: Env): Promise<WeeklyAI> {
       ],
       response_format: {
         type: "json_schema",
-        json_schema: weeklySchema,
+        schema: weeklySchema,
       },
     },
   );
