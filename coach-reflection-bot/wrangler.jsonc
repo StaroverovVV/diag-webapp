@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "coach-reflection-bot",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-06",
+  "compatibility_flags": ["nodejs_compat"],
+  "ai": { "binding": "AI" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "coach-reflection-bot",
+      "database_id": "REPLACE_AFTER_D1_CREATE"
+    }
+  ],
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
+  "vars": {
+    "TIME_ZONE": "Europe/Moscow",
+    "DEFAULT_MORNING_TIME": "09:00",
+    "DEFAULT_EVENING_TIME": "20:30",
+    "DEFAULT_WEEKLY_MIRO_TIME": "21:00",
+    "DEFAULT_WEEKLY_MIRO_DAY": "0",
+    "AI_TEXT_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",
+    "AI_AUDIO_MODEL": "@cf/openai/whisper-large-v3-turbo",
+    "NOTION_VERSION": "2026-03-11"
+  }
+}
