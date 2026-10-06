@@ -1,0 +1,22 @@
+name: Coach Reflection Bot CI
+
+on:
+  push:
+    paths:
+      - "coach-reflection-bot/**"
+      - ".github/workflows/coach-reflection-bot-ci.yml"
+  workflow_dispatch:
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: coach-reflection-bot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - run: npm run typecheck
