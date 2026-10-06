@@ -7,9 +7,7 @@
   "ai": { "binding": "AI" },
   "d1_databases": [
     {
-      "binding": "DB",
-      "database_name": "coach-reflection-bot",
-      "database_id": "REPLACE_AFTER_D1_CREATE"
+      "binding": "DB"
     }
   ],
   "triggers": {
