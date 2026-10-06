@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
     "db:create": "wrangler d1 create coach-reflection-bot",
-    "db:migrate": "wrangler d1 migrations apply coach-reflection-bot --remote",
+    "db:migrate": "wrangler d1 migrations apply DB --remote",
     "db:migrate:local": "wrangler d1 migrations apply coach-reflection-bot --local",
     "typecheck": "tsc --noEmit"
   },
@@ -16,5 +16,27 @@
     "typescript": "latest",
     "wrangler": "latest",
     "@types/node": "latest"
+  },
+  "cloudflare": {
+    "bindings": {
+      "TELEGRAM_BOT_TOKEN": {
+        "description": "Токен Telegram-бота из @BotFather. Не публикуйте его."
+      },
+      "SETUP_CODE": {
+        "description": "Придумайте случайный код 12+ символов. Он нужен один раз для /bind и bootstrap."
+      },
+      "NOTION_TOKEN": {
+        "description": "Internal integration secret Notion, с доступом только к базе наблюдений клиента."
+      },
+      "NOTION_DATA_SOURCE_ID": {
+        "description": "ID data source базы Notion «Наблюдения между сессиями»."
+      },
+      "MIRO_ACCESS_TOKEN": {
+        "description": "Miro access token с правом записи только в нужную доску."
+      },
+      "MIRO_BOARD_ID": {
+        "description": "ID Miro-доски клиента."
+      }
+    }
   }
 }
